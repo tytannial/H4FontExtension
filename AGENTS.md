@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Win32 **x86** DLL built as `H4CN.asi`: an ASI plugin that inline-hooks 7 font functions in HoMM IV
-`heroes4.exe` (2003 Complete) so text renders / measures / wraps GBK-aware and Chinese displays.
+`heroes4.exe` (2003 Complete) so text renders / measures / wraps GBK-aware and Chinese displays. It
+also carries the four `Heroes4GL` mod exports, so the same binary drops in as `mods\H4CN.mod`.
 No tests, no CI, no package manager — a clean build is the only automated signal.
 
 Sources are Google C++ style (`.cc`/`.h`, `clang-format --style=file`, 80 columns, `kCamelCase`
@@ -17,7 +18,7 @@ constants, `PascalCase` functions, `snake_case` variables).
 | `font_cache.*` | `FontContext` per (face, size, supersample), advance + pixel caches, font metrics |
 | `blit.*` | 4-bit alpha → RGB565 blend + single-line drawing (`DrawLine`) |
 | `wrap.*` | line breaking (`WrapText`) via the `Advancer` interface, no game memory — unit-tested |
-| `hooks.*` / `main.cc` | the 7 hooks; one-shot `Initialize()` from `DllMain` + the `zk` export, restore on detach |
+| `hooks.*` / `main.cc` | the 7 hooks; one-shot `Initialize()` from `DllMain` + the `zk` export, restore on detach, and the four `Heroes4GL` mod-export stubs |
 
 ## Build
 
@@ -25,6 +26,9 @@ constants, `PascalCase` functions, `snake_case` variables).
 ./build.ps1 -Config Debug            # or -Config Release, -DeployDir '<game dir>\plugins', -Clean
 ./build.ps1 -Config Debug -Test      # additionally builds + runs the WrapText/Config host tests (ctest)
 ```
+
+`-DeployDir` copies `H4CN.asi` into the ASI loader's `plugins\`; `-ModDir '<game dir>\mods'` copies
+the same binary as `H4CN.mod` for the `Heroes4GL` loader. Install one host copy, not both.
 
 `build.ps1` does the three things that are easy to get wrong: locates VS via `vswhere`, enters the
 **x86** developer environment (`Enter-VsDevShell -DevCmdArguments '-arch=x86 -host_arch=x64'`), and
@@ -123,6 +127,14 @@ channel switches; a broken file must only log and fall back to defaults.
   `H4CN.log` (a single best-effort `CreateFile`/`WriteFile`/`CloseHandle`, silently dropped on any
   error) so the file is always proof-of-life. Do not turn that into a general logging path that does
   disk I/O per frame.
+- The `Heroes4GL` mod ABI (`mods\*.mod`) is satisfied by four `__stdcall` exports the loader resolves
+  in `Mods::Load` and keeps the module only if **all four** are non-null: `GetName`, `GetMenu`,
+  `SetHWND`, `LoadPackages`. They are pure no-op stubs (empty `GetName` string, `GetMenu` returns
+  `nullptr`, `SetHWND`/`LoadPackages` do nothing) — the mod path still runs the real `DllMain`
+  `Initialize()`, so hooks install identically to the ASI path. Match the loader's typedefs exactly
+  (`__stdcall`; the `LoadPackages` callback is `__cdecl`). `GetMenu` collides with the `user32`
+  prototype, so it is exported via `#pragma comment(linker, "/export:GetMenu=_H4cnModGetMenu@4")`
+  aliases, not `__declspec(dllexport)`.
 
 ## Docs
 

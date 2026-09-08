@@ -118,3 +118,17 @@ if(H4CN_DEPLOY_DIR)
         VERBATIM
     )
 endif()
+
+# Optional: the same binary as a Heroes4GL mod. Its loader scans <game>\mods
+# for *.mod, so the copy must carry that extension; install one host copy only
+# (see the mod-exports comment in main.cc). The target directory must exist.
+set(H4CN_MOD_DIR "" CACHE PATH
+    "Heroes4GL mods directory (<game>\\mods) to copy H4CN.mod into (empty = do not copy)")
+if(H4CN_MOD_DIR)
+    add_custom_command(TARGET H4CN POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:H4CN>" "${H4CN_MOD_DIR}/H4CN.mod"
+        COMMENT "Deploying H4CN.mod to ${H4CN_MOD_DIR}"
+        VERBATIM
+    )
+endif()

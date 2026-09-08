@@ -24,6 +24,9 @@
   游戏根目录不放插件。所以产物部署命令是（`<游戏目录>` 为你的安装路径）：
   `./build.ps1 -Config Release -DeployDir '<游戏目录>\plugins'`
 - 这也是 `CMakeLists.txt` 里 `SUFFIX ".asi"` + `PREFIX ""` 的原因（加载器按 `.asi` 扩展名扫描）。
+- **另一种宿主：`Heroes4GL`**（`ddraw.dll` GL 封装）不读 `plugins\*.asi`，而是扫 `mods\*.mod`。
+  同一份产物带 4 个 mod 导出（见 §7.2），故 `-ModDir '<游戏目录>\mods'` 投放为 `H4CN.mod` 即可
+  走这条路；与 ASI 宿主**二选一**，同时装会加载两次（第二份 `0/7 installed` 空转，安全但无意义）。
 - ⚠ **`heroes4.exe` 同级的 `Mp3dec.asi` 与本项目无关**：它是游戏自带的 Miles Sound System
   MP3 解码插件（由 `Mss32.dll` 按自己的插件机制加载），不是 ASI 加载器的插件，
   也不能作为「.asi 放根目录」的证据。旧文档在这点上写错过，以本节为准。
@@ -334,6 +337,16 @@ UI 文本控件: t_text_window_set_text@0x886830 / set_font@0x886790 / on_size_c
   LoadLibrary/手动映射后 `GetProcAddress("zk")` 调用。两条路径只生效一次，后到者为空操作；
   DllMain 没跑过时 `zk` 用 `GetModuleHandleExW` 自行找回模块句柄（定位 `plugins\` 下的 log/toml）。
 - `DLL_PROCESS_DETACH` 先 `UninstallAllHooks()` 还原原字节，再释放 GDI/缓存。
+- **`Heroes4GL` 模组兼容（`mods\*.mod`）**：Heroes4GL（`ddraw.dll` GL 封装）在自己的 `DllMain` 里
+  `FindFirstFile "<game>\mods\*.mod"` → `LoadLibrary`，再 `GetProcAddress` 取 `GetName`/`GetMenu`/
+  `SetHWND`/`LoadPackages` 四个 `__stdcall` 导出，**四者全非空才保留**、少一个即 `FreeLibrary`
+  （见 HeroesGL 的 `Mods::Load`）。本插件这四个都是纯 ABI 桩：`GetName` 回静态串 `"H4CN Chinese
+  font"`，`GetMenu` 回 `nullptr`（无自制菜单，全员 `nullptr` 时 H4GL 连「Mods」弹出项都不建），
+  `SetHWND` 空（不子类化窗口），`LoadPackages` 不调回调（不注入 `.erps`）。真正的装钩仍由
+  `LoadLibrary` 触发的 `DllMain`→`Initialize()` 完成，与 `.asi` 路径逐字节相同。`GetMenu` 与
+  `user32` 同名，故用 `#pragma comment(linker, "/export:GetMenu=_H4cnModGetMenu@4")` 别名导出，
+  不用 `__declspec`。同一镜像若 `.asi` 与 `.mod` 各装一份会加载两次，第二份序言比对失败 →
+  记 `0/7 installed` 空转、不重复打补丁（**二选一部署**）。构建 `-ModDir '<game>\mods'` 直接投放。
 
 ### 7.3 GBK 判定、断行与测量
 
@@ -402,7 +415,7 @@ clr=(M0&(16*(M1&clr)+nMask*((M1&fg)-(M1&clr))))+(M2&(16*(M3&clr)+nMask*((M3&fg)-
 | `blit.*` | 4bit alpha → RGB565 混合（只走墨迹盒）+ `DrawLine`（按字节区间绘制） |
 | `wrap.*` | `WrapText`（**唯一**断行实现）+ `WrapTextOptimal`（复刻 0x71C5E0 的 min..max 增长搜索）+ `DecodeChar`；经 `Advancer` 测量，不碰游戏内存/GDI，host 可单测 |
 | `hooks.*` | 7 个 hook 函数 + `InstallHooks()` |
-| `main.cc` | `InitOnceExecuteOnce` 一次性 `Initialize()`：`DllMain` ATTACH 调用；另导出无参无返回的 `zk`（其他注入工具 `GetProcAddress("zk")` 手动加载后调用，重复调用/已初始化则空操作）；DETACH 先还原钩子再释放 GDI/缓存 |
+| `main.cc` | `InitOnceExecuteOnce` 一次性 `Initialize()`：`DllMain` ATTACH 调用；另导出无参无返回的 `zk`（其他注入工具 `GetProcAddress("zk")` 手动加载后调用，重复调用/已初始化则空操作）；DETACH 先还原钩子再释放 GDI/缓存。再加 4 个 `__stdcall` 空实现 `GetName`/`GetMenu`/`SetHWND`/`LoadPackages` 供 `Heroes4GL` 以 `mods\*.mod` 加载（见 §7.2）|
 | `tests/wrap_test.cc` `tests/config_test.cc` | host 控制台单测（`./build.ps1 -Config Debug -Test`，默认不建）：断行行数/宽度/断词规则；`ParseConfig` 的类型/范围/优先级/坏值回落 |
 
 Hook 之间的分工要点：#1–#7 全部全量替换原实现（`orig` 传 `nullptr`，安装器不建 trampoline）；
@@ -471,6 +484,7 @@ combat 消息渲染路径核实、系统2 专项）。逆工通用注意（tail 
 ./build.ps1 -Config Release -DeployDir '<游戏目录>\plugins'
 # 产物: out/build/x86-release/H4CN.asi（-Config Debug → out/build/x86-debug/）
 # -Clean 先删该预设的构建树；-Test 额外构建并运行 host 单测（ctest：wrap+config）
+# -ModDir '<游戏目录>\mods' 追加把同一产物复制成 H4CN.mod 供 Heroes4GL 加载（与 ASI 二选一）
 ```
 
 `build.ps1` 定位 VS（vswhere）、进 **x86** 开发者环境（`Enter-VsDevShell -DevCmdArguments
@@ -481,7 +495,7 @@ Strawberry Perl 附带的 `cmake.exe` 会以 `0xC000007B` 崩溃），再跑
 
 CMakeLists.txt：C++20、`/W4 /permissive-`、链接 kernel32+gdi32+user32（`GetDC`/`ReleaseDC` 在
 user32）、`OUTPUT_NAME H4CN` + `SUFFIX ".asi"` + `PREFIX ""` + `DEBUG_POSTFIX ""`；
-可选 `H4CN_DEPLOY_DIR` 非空时 POST_BUILD 拷一份过去。
+可选 `H4CN_DEPLOY_DIR`（→ `H4CN.asi`）与 `H4CN_MOD_DIR`（→ `H4CN.mod`）非空时各 POST_BUILD 拷一份过去。
 CRT 为默认 `/MD`（Debug 是 `/MDd`）：**Release 目标机需装 VC++ 2015-2022 x86 运行库；Debug 版依赖
 调试版 CRT（`MSVCP140D/VCRUNTIME140D/ucrtbased`），只在装了 VS 的机器上能加载，不可外发。**
 

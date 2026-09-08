@@ -20,6 +20,12 @@
     ASI Loader runs with LoadFromScriptsOnly=1, so plugins\ is the only scanned
     location - the game root is not.
 
+.PARAMETER ModDir
+    Heroes4GL mods directory, e.g. 'D:\Games\Heroes4\mods'. Passed through as
+    -DH4CN_MOD_DIR so the build also copies the binary there as H4CN.mod, the
+    extension Heroes4GL's mod loader scans for. Install one host copy only
+    (plugins\H4CN.asi OR mods\H4CN.mod, not both).
+
 .PARAMETER Clean
     Delete the preset's build tree before configuring.
 
@@ -32,6 +38,8 @@
 .EXAMPLE
     ./build.ps1 -Config Release -DeployDir 'D:\Games\Heroes4\plugins'
 .EXAMPLE
+    ./build.ps1 -Config Release -ModDir 'D:\Games\Heroes4\mods'
+.EXAMPLE
     ./build.ps1 -Config Debug -Test
 #>
 [CmdletBinding()]
@@ -40,6 +48,8 @@ param(
     [string]$Config = 'Debug',
 
     [string]$DeployDir = '',
+
+    [string]$ModDir = '',
 
     [switch]$Clean,
 
@@ -101,6 +111,9 @@ try {
     if ($DeployDir) {
         $configureArgs += "-DH4CN_DEPLOY_DIR=$DeployDir"
     }
+    if ($ModDir) {
+        $configureArgs += "-DH4CN_MOD_DIR=$ModDir"
+    }
     if ($Test) {
         $configureArgs += '-DH4CN_BUILD_TESTS=ON'
     }
@@ -123,4 +136,7 @@ $asi = Join-Path $outDir 'H4CN.asi'
 Write-Host "`nBuilt: $asi" -ForegroundColor Green
 if ($DeployDir) {
     Write-Host "Deployed to: $DeployDir" -ForegroundColor Green
+}
+if ($ModDir) {
+    Write-Host "Mod-deployed to: $ModDir" -ForegroundColor Green
 }
