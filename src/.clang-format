@@ -1,0 +1,20 @@
+# Google C++ Style Guide: https://google.github.io/styleguide/cppguide.html
+#
+# Format with the clang-format that ships with Visual Studio:
+#   & "$vs\VC\Tools\Llvm\x64\bin\clang-format.exe" -i --style=file *.cc *.h
+# Check without writing:
+#   ... clang-format.exe --dry-run -Werror --style=file *.cc *.h
+Language: Cpp
+BasedOnStyle: Google
+Standard: Latest
+ColumnLimit: 80
+IndentWidth: 2
+PointerAlignment: Left
+DerivePointerAlignment: false
+# Keep Windows.h / project header grouping as written; MSVC needs Windows.h
+# first in the translation units that use it.
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
+AccessModifierOffset: -1
+NamespaceIndentation: None
+FixNamespaceComments: true

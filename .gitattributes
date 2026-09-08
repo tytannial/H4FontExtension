@@ -1,0 +1,16 @@
+* text=auto eol=lf
+*.asi binary
+*.dll binary
+*.lib binary
+*.exp binary
+*.obj binary
+*.pdb binary
+*.i64 binary
+*.id0 binary
+*.id1 binary
+*.id2 binary
+*.nam binary
+*.til binary
+*.map binary
+*.png binary
+*.ico binary

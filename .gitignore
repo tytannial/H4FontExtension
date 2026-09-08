@@ -1,0 +1,16 @@
+build/
+out/
+.vs/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.vcxproj.filters
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.dir/
+.cache/
+compile_commands.json
+H4CN.toml
+H4CN.log

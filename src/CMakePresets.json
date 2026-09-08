@@ -1,0 +1,61 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../out/build/${presetName}",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [
+            "windows"
+          ],
+          "intelliSenseMode": "windows-msvc-x86"
+        }
+      }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug",
+      "description": "32-bit MSVC, Debug. Depends on the debug CRT (ucrtbased/VCRUNTIME140D) - local testing only, never ship.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release",
+      "description": "32-bit MSVC, Release. Shippable H4CN.asi; target machine needs the VC++ 2015-2022 x86 redistributable.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug",
+      "configurePreset": "x86-debug"
+    },
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release",
+      "configurePreset": "x86-release"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# Static checks that complement the Google style rules in .clang-format.
+#
+# Two things this repo needs beyond a stock run:
+#
+#   1. A compilation database - the presets set CMAKE_EXPORT_COMPILE_COMMANDS=ON,
+#      so point -p at out/build/x86-debug (or x86-release).
+#   2. --extra-arg=-m32. The compile commands name an x86 cl.exe but carry no
+#      arch flag, so clang defaults to the host triple (x64) and every pointer
+#      size in game_types.h looks wrong - the static_asserts there fail and the
+#      pointer<->uint32_t casts in inline_hook.cc warn. Analysing as x86 matches
+#      what the shipped .asi actually is.
+#
+#   $vs = 'C:\Program Files\Microsoft Visual Studio\18\Community'
+#   & "$vs\VC\Tools\Llvm\x64\bin\clang-tidy.exe" -p out/build/x86-debug `
+#       --extra-arg=-m32 --quiet blit.cc font_cache.cc hooks.cc `
+#       inline_hook.cc main.cc wrap.cc tests/wrap_test.cc
+Checks: >
+  bugprone-*,
+  google-*,
+  performance-*,
+  clang-analyzer-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  -bugprone-easily-swappable-parameters,
+  -google-runtime-int,
+  -performance-no-int-to-ptr
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/src/.*\.h$'
+FormatStyle: file
+
+# performance-no-int-to-ptr is disabled on purpose: hooking a fixed game build
+# means turning calibrated absolute addresses (game_addrs.h) into pointers, and
+# in a 32-bit process that costs nothing.

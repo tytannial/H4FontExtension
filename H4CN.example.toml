@@ -1,0 +1,108 @@
+# H4CN.toml —— 英雄无敌 IV 中文渲染插件(H4CN.asi)配置文件
+#
+# 用法:把本文件复制为 heroes4.exe 目录下 plugins\H4CN.toml 后按需修改。
+# 所有项都可省略;整个文件不存在时插件行为与未提供配置时完全一致。
+# 任何一项写错(类型/取值)只会被忽略并在 plugins\H4CN.log 里说明,不影响游戏。
+#
+# 生效时机:首次绘制文字时读取一次,改完配置需要重启游戏。
+
+[general]
+# 是否在 plugins\ 下追加写 H4CN.log(每次启动一行小结 + 异常说明)
+log_file = true
+# 是否输出 DebugView/调试器可见的 OutputDebugString
+log_debug_view = true
+# 是否把实测的 GDI 行高(tmHeight)写回游戏字体的 line_height 字段。
+# 关掉后未挂钩的旧绘制路径会按 .fon 原始行高排版,可能出现行间重叠——
+# 仅用于对比排错,请保持 true。
+patch_line_height = true
+
+[render]
+# 字形光栅化的**全局默认**超采样倍数(1..4)。GDI 在这么小的字号上,细笔画只能落在
+# 整像素网格上,几乎不产生中间级覆盖(实测 13px 隶书只有 0/15 两级),于是边缘生硬。
+# 设 N 后:先用 N 倍大的字号把字形画进 DIB,再把每个 N×N 小块平均(降采样)回 1×,
+# 笔画就能落在"半个像素"的位置——这才是小字边缘变好的关键(与 Heroes4GL 在显示端
+# 做 Hermite/Lanczos/xBRZ 同理,只是这里放在源字形这一级,1:1 显示下也看得出来)。
+#   1 = 关闭(与 v3.1.0 稳定版逐位一致的原样)
+#   2 = 全局默认;内存与光栅期开销按 4× 增(每字形一次,不影响帧内耗时)
+#   3 / 4 = 更细腻但更糊,大字号收益递减,自行对比
+# 只改像素,不改测宽/换行/行高。**每个字号可在 [fonts.<size>] 里用 supersample 覆盖**
+# (见下):太小的字点对点反而更清晰锐利。改完重启游戏生效。
+supersample = 2
+
+[fonts]
+# 所有游戏字号默认使用的替换字体(UTF-8 字体名,如 "LiSu" 隶书、"SimHei" 黑体、
+# "Microsoft YaHei" 微软雅黑)。需系统已安装该字体,否则 Windows 会静默替换,
+# H4CN.log 里会记一行实际用上的字体名。
+fallback_face = "LiSu"
+# 默认 GDI 像素高 = 游戏字号 + default_bias(与配置文件出现前的行为一致)
+default_bias = 4
+
+# 按游戏字号单独覆盖。表键 = 游戏内位图字体的名义字号 t_font::size(t_font+0x04)。
+# 注意:这是 .fon 资源里的名义尺寸,不是 get_font 的请求字号——两者编号不同
+# (见 docs/PROGRESS.md §4.2)。实测已出现:8 10 12 13 15 18 20 21 23 25 26 28(不保证穷尽);
+# 没写进配置的 size 照样工作(走 fallback + default_bias),并会在 H4CN.log 里
+# 以 `game size NN -> ...` 出现,照它补配置即可。
+#
+# 每个表里四个键都可选。size/bias 优先级:size > bias > [fonts].default_bias:
+#   face        = "字体名"  该字号换用的 GDI 字体(省略 = fallback_face)
+#   size        = N         直接指定 GDI 像素高(1..256)
+#   bias        = K         该字号的 size+K 偏置
+#   supersample = N         该字号的超采样倍数(1..4),覆盖 [render].supersample;
+#                           1 = 这个字号回到点对点原始光栅(小字更锐利常用)
+
+# 例:最大的标题字(资源名义 28)换黑体并加大到 35 px:
+[fonts.28]
+bias = 7
+face = "LiSu"
+
+# 例:根据不同的字体放大不同比例
+[fonts.26]
+bias = 6
+face = "LiSu"
+
+[fonts.25]
+bias = 6
+face = "LiSu"
+
+[fonts.23]
+bias = 6
+face = "LiSu"
+
+[fonts.21]
+bias = 5
+face = "LiSu"
+
+[fonts.20]
+bias = 5
+face = "LiSu"
+
+[fonts.18]
+bias = 5
+face = "LiSu"
+
+[fonts.16]
+bias = 4
+face = "LiSu"
+
+[fonts.15]
+bias = 4
+face = "LiSu"
+
+[fonts.13]
+bias = 3
+face = "LiSu"
+
+# 例:最小的几档字号点对点更清楚,关掉超采样(其余字号仍走全局 supersample=2):
+[fonts.12]
+bias = 3
+face = "LiSu"
+
+[fonts.10]
+bias = 3
+face = "SimSun"
+supersample = 1
+
+[fonts.8]
+bias = 2
+face = "SimSun"
+supersample = 1

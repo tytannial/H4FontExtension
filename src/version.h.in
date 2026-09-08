@@ -1,0 +1,7 @@
+// Generated from version.h.in by CMake - do not edit in the build tree.
+#ifndef H4CN_VERSION_H_
+#define H4CN_VERSION_H_
+
+#define H4CN_VERSION_STRING "@PROJECT_VERSION@"
+
+#endif  // H4CN_VERSION_H_
