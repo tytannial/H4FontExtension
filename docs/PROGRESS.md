@@ -329,6 +329,10 @@ UI 文本控件: t_text_window_set_text@0x886830 / set_font@0x886790 / on_size_c
   `nullptr`（`kFontWrapTextMm` 的委托已换成 `WrapTextOptimal`）。
 - 补丁：≥7 字节用 `B8 imm32 / FF E0`（多出的长度 NOP 填充），5/6 字节用 `E9 rel32`（+NOP）。
   写完 `FlushInstructionCache`；返回 `HookInstallResult` 枚举，失败原因由 `InstallHooks` 汇总诊断。
+- 初始化是一次性 `Initialize()`（`InitOnceExecuteOnce`）：`DllMain(DLL_PROCESS_ATTACH)` 调用；同时
+  导出无参无返回的 `zk`（`extern "C" __declspec(dllexport)`，x86 导出表名即 `zk`）供其他注入工具在
+  LoadLibrary/手动映射后 `GetProcAddress("zk")` 调用。两条路径只生效一次，后到者为空操作；
+  DllMain 没跑过时 `zk` 用 `GetModuleHandleExW` 自行找回模块句柄（定位 `plugins\` 下的 log/toml）。
 - `DLL_PROCESS_DETACH` 先 `UninstallAllHooks()` 还原原字节，再释放 GDI/缓存。
 
 ### 7.3 GBK 判定、断行与测量
@@ -398,7 +402,7 @@ clr=(M0&(16*(M1&clr)+nMask*((M1&fg)-(M1&clr))))+(M2&(16*(M3&clr)+nMask*((M3&fg)-
 | `blit.*` | 4bit alpha → RGB565 混合（只走墨迹盒）+ `DrawLine`（按字节区间绘制） |
 | `wrap.*` | `WrapText`（**唯一**断行实现）+ `WrapTextOptimal`（复刻 0x71C5E0 的 min..max 增长搜索）+ `DecodeChar`；经 `Advancer` 测量，不碰游戏内存/GDI，host 可单测 |
 | `hooks.*` | 7 个 hook 函数 + `InstallHooks()` |
-| `main.cc` | `DllMain`：ATTACH 装钩，DETACH 先还原钩子再释放 GDI/缓存 |
+| `main.cc` | `InitOnceExecuteOnce` 一次性 `Initialize()`：`DllMain` ATTACH 调用；另导出无参无返回的 `zk`（其他注入工具 `GetProcAddress("zk")` 手动加载后调用，重复调用/已初始化则空操作）；DETACH 先还原钩子再释放 GDI/缓存 |
 | `tests/wrap_test.cc` `tests/config_test.cc` | host 控制台单测（`./build.ps1 -Config Debug -Test`，默认不建）：断行行数/宽度/断词规则；`ParseConfig` 的类型/范围/优先级/坏值回落 |
 
 Hook 之间的分工要点：#1–#7 全部全量替换原实现（`orig` 传 `nullptr`，安装器不建 trampoline）；

@@ -17,7 +17,7 @@ constants, `PascalCase` functions, `snake_case` variables).
 | `font_cache.*` | `FontContext` per (face, size, supersample), advance + pixel caches, font metrics |
 | `blit.*` | 4-bit alpha → RGB565 blend + single-line drawing (`DrawLine`) |
 | `wrap.*` | line breaking (`WrapText`) via the `Advancer` interface, no game memory — unit-tested |
-| `hooks.*` / `main.cc` | the 7 hooks; `DllMain` install/restore |
+| `hooks.*` / `main.cc` | the 7 hooks; one-shot `Initialize()` from `DllMain` + the `zk` export, restore on detach |
 
 ## Build
 
@@ -113,10 +113,13 @@ channel switches; a broken file must only log and fall back to defaults.
 - H4CN.toml is read **lazily on the first hooked call** (`EnsureConfigLoaded` in `config.cc`),
   never in `DllMain`, and a parse/type error degrades to defaults + one log line — never a crash. Only
   `config.cc` includes the single-header `deps/toml.hpp` (one TU).
-- Links `gdi32`, `kernel32`, `user32` only (`user32` for `GetDC`/`ReleaseDC`). All installation happens
-  in `DllMain(DLL_PROCESS_ATTACH)`; `DLL_PROCESS_DETACH` restores the patched prologues *before*
-  releasing GDI and caches. Keep it that way — no loader/injector in this repo, and no heavy work in
-  `DllMain`. The one deliberate exception: `diagnostics.*` appends the startup summary to
+- Links `gdi32`, `kernel32`, `user32` only (`user32` for `GetDC`/`ReleaseDC`). Installation happens in
+  an `InitOnceExecuteOnce`-guarded `Initialize()` run exactly once from `DllMain(DLL_PROCESS_ATTACH)`
+  or from the `zk` export — a no-arg, no-return `extern "C"` dllexport for other injection tools
+  (`GetProcAddress("zk")` after a manual map; once DllMain already ran it is a no-op, and `zk`
+  recovers the module handle via `GetModuleHandleExW` when DllMain never did);
+  `DLL_PROCESS_DETACH` restores the patched prologues *before* releasing GDI and caches. Keep it
+  that way — no loader/injector in this repo, and no heavy work in `DllMain`. The one deliberate exception: `diagnostics.*` appends the startup summary to
   `H4CN.log` (a single best-effort `CreateFile`/`WriteFile`/`CloseHandle`, silently dropped on any
   error) so the file is always proof-of-life. Do not turn that into a general logging path that does
   disk I/O per frame.
