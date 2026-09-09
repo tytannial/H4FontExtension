@@ -80,11 +80,12 @@ void __fastcall HookFontDrawToPt(game::Font* font, uint32_t /*edx*/,
   if (str == nullptr || *str == 0 || dst == nullptr) return;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   const Line line{
       str, static_cast<int>(std::strlen(reinterpret_cast<const char*>(str)))};
   // No right-edge clipping here, exactly like the stock draw_to.
-  DrawLine(line, dst, x, y, ctx, fg_color, draw_shadow != 0, shadow_color,
+  DrawLine(line, dst, x, y, router, fg_color, draw_shadow != 0, shadow_color,
            /*clip_x1=*/0);
 }
 
@@ -105,11 +106,12 @@ int __fastcall HookFontGetWidth(game::Font* font, uint32_t /*edx*/,
   if (str == nullptr || *str == 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   int total = 0;
   for (const uint8_t* p = str; *p != 0;) {
     int len = 0;
-    total += ctx->Advance(DecodeChar(p, &len));
+    total += router.Advance(DecodeChar(p, &len));
     p += len;
   }
   return total;
@@ -125,12 +127,13 @@ int __fastcall HookFontGetColumn(game::Font* font, uint32_t /*edx*/,
   if (str == nullptr || *str == 0 || max_width <= 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   int used = 0;
   int bytes = 0;
   for (const uint8_t* p = str; *p != 0;) {
     int len = 0;
-    const int advance = ctx->Advance(DecodeChar(p, &len));
+    const int advance = router.Advance(DecodeChar(p, &len));
     if (used + advance > max_width) {
       // Keep the character when it only barely overflows, mirroring the
       // half-glyph tolerance of the stock get_column.
@@ -159,10 +162,11 @@ int __fastcall HookFontWrapTextMm(game::Font* font, uint32_t /*edx*/,
   if (lines == nullptr) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr || str == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   std::vector<Line> wrapped;
   const OptimalWrap optimal = WrapTextOptimal(
-      str, min_width, max_width, ctx->line_height(), *ctx, &wrapped);
+      str, min_width, max_width, ctx->line_height(), router, &wrapped);
   WriteLines(lines, wrapped);
   return optimal.result.max_width;
 }
@@ -179,9 +183,10 @@ int __fastcall HookFontWrapText(game::Font* font, uint32_t /*edx*/,
   if (lines == nullptr) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr || str == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   std::vector<Line> wrapped;
-  const WrapResult result = WrapText(str, width, *ctx, &wrapped);
+  const WrapResult result = WrapText(str, width, router, &wrapped);
   WriteLines(lines, wrapped);
   return result.max_width;
 }
@@ -207,15 +212,16 @@ int __fastcall HookFontDrawToRect(game::Font* font, uint32_t /*edx*/,
 
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
   std::vector<Line> lines;
-  WrapText(str, width, *ctx, &lines);
+  WrapText(str, width, router, &lines);
 
   const int line_height = ctx->line_height();
   int y = rect->y;
   for (const Line& line : lines) {
     if (y + line_height > rect->y1) break;  // same cut-off as draw_to_vector
-    DrawLine(line, dst, rect->x, y, ctx, fg_color, draw_shadow != 0,
+    DrawLine(line, dst, rect->x, y, router, fg_color, draw_shadow != 0,
              shadow_color, rect->x1);
     y += line_height;
   }
@@ -236,8 +242,9 @@ int __fastcall HookFontGetWrappedHeight(game::Font* font, uint32_t /*edx*/,
   if (str == nullptr || *str == 0 || width <= 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
 
-  const WrapResult result = WrapText(str, width, *ctx, /*lines=*/nullptr);
+  const WrapResult result = WrapText(str, width, router, /*lines=*/nullptr);
   return result.line_count * ctx->line_height();
 }
 

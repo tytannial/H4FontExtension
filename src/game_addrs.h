@@ -73,6 +73,14 @@ inline constexpr uint32_t kAddrStrVecInsert = 0x440F50;  // vector::insert(p, v)
 inline constexpr uint32_t kAddrStrAssign = 0x401D30;     // string::assign(p, n)
 inline constexpr uint32_t kAddrStrTidy = 0x401CE0;       // string::_Tidy(bool)
 
+// --- called (not hooked) game functions -------------------------------------
+// t_font_bitmap::draw_to(t_bitmap&, x, y, u16 color, bool shadow, u16 shadow)
+// @0x71B820. It is NOT one of the seven patched entry points and sits below all
+// of them, so it is fully intact at runtime; "keep original ASCII" routes those
+// glyphs straight through it for a pixel-identical stock blit. __thiscall with
+// the t_font_bitmap* in ECX.
+inline constexpr uint32_t kAddrFontBlitGlyph = 0x71B820;
+
 // --- RGB565 blend masks -----------------------------------------------------
 // Initialised by the game before the first draw. Read at blit time so the
 // plugin follows the game rather than assuming a resolution/pixel format.

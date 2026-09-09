@@ -411,6 +411,15 @@ FontContext* GetFontContext(const game::Font& font) {
   return ctx->valid() ? ctx : nullptr;
 }
 
+bool KeepOriginalAscii(const game::Font& font) {
+  // Same lazy config load and the same game-size resolution as
+  // GetFontContext, so the routing decision can never disagree with the
+  // substitute face/cell already chosen for this size.
+  EnsureConfigLoaded();
+  const int game_size = font.size > 0 ? font.size : kFallbackFontSize;
+  return GetConfig().AsciiOriginal(game_size);
+}
+
 void PatchFontMetrics(game::Font* font, int line_height) {
   if (font == nullptr || line_height <= 0) return;
   if (font->line_height != line_height) font->line_height = line_height;

@@ -123,6 +123,14 @@ class FontContext : public Advancer {
 // byte-oriented code.
 FontContext* GetFontContext(const game::Font& font);
 
+// Whether `font`'s printable ASCII should be drawn from the original .fon
+// bitmap rather than the GDI substitute, per H4CN.toml ([render].ascii_original
+// with a [fonts.<size>] override). Resolves the game size the same way
+// GetFontContext does, so the two always agree on which size is meant. The
+// per-code range check happens later in GlyphRouter; this is only the size's
+// on/off decision.
+bool KeepOriginalAscii(const game::Font& font);
+
 // Rewrites font->line_height so that code paths this plugin does not hook
 // (t_text_window_paint, t_text_window_update_layout, ...) lay out with the
 // height the glyphs actually occupy. Called on every hook entry.

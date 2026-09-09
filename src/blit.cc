@@ -15,6 +15,24 @@ uint32_t ReadBlendMask(uint32_t addr, uint32_t fallback) {
   return value != 0 ? value : fallback;
 }
 
+// t_font_bitmap::draw_to @0x71B820: the game's own per-glyph RGB565 blitter.
+// It is NOT one of the seven patched entry points (it sits below all of them)
+// and is fully intact at runtime, so calling it reproduces the stock pixels
+// exactly instead of re-deriving the blend. __thiscall: the t_font_bitmap* goes
+// in ECX, the rest on the stack - the same shape the other called game helpers
+// use.
+using FnFontBlitGlyph = void(__thiscall*)(const game::FontBitmap*,
+                                          game::Bitmap*, int, int, uint16_t,
+                                          uint8_t, uint16_t);
+
+void BlitOriginal(const game::FontBitmap& glyph, game::Bitmap* dst, int x,
+                  int y, uint16_t fg_color, bool draw_shadow,
+                  uint16_t shadow_color) {
+  if (dst == nullptr || dst->buffer == nullptr) return;
+  auto blit = reinterpret_cast<FnFontBlitGlyph>(game::kAddrFontBlitGlyph);
+  blit(&glyph, dst, x, y, fg_color, draw_shadow ? 1 : 0, shadow_color);
+}
+
 }  // namespace
 
 void BlitGlyph(const Glyph& glyph, game::Bitmap* dst, int x, int y,
@@ -87,9 +105,32 @@ void BlitGlyph(const Glyph& glyph, game::Bitmap* dst, int x, int y,
   }
 }
 
+const game::FontBitmap* GlyphRouter::OriginalGlyph(uint32_t code) const {
+  if (!ascii_original_ || font_ == nullptr || font_->glyphs == nullptr) {
+    return nullptr;
+  }
+  // Only single-byte printable ASCII; every GBK code DecodeChar produces is
+  // >= 0x8000 and fails this bound, so no multi-byte character is ever split.
+  if (code < 0x20 || code > 0x7E) return nullptr;
+  const int idx = static_cast<int>(code) - font_->first_char;
+  if (idx < 0 || idx >= font_->glyph_count) return nullptr;
+  return &font_->glyphs[idx];
+}
+
+int GlyphRouter::Advance(uint32_t code) {
+  const game::FontBitmap* glyph = OriginalGlyph(code);
+  if (glyph != nullptr) {
+    // Same no-trim per-glyph model the draw loop uses below, so measuring and
+    // laying out can never drift apart.
+    return glyph->margin_left + glyph->width + glyph->margin_right;
+  }
+  return ctx_->Advance(code);
+}
+
 void DrawLine(const Line& line, game::Bitmap* dst, int x, int y,
-              FontContext* ctx, uint16_t fg_color, bool draw_shadow,
+              GlyphRouter& router, uint16_t fg_color, bool draw_shadow,
               uint16_t shadow_color, int clip_x1) {
+  FontContext* ctx = router.context();
   if (line.text == nullptr || line.len <= 0 || dst == nullptr ||
       ctx == nullptr) {
     return;
@@ -102,6 +143,20 @@ void DrawLine(const Line& line, game::Bitmap* dst, int x, int y,
     int len = 0;
     const uint32_t code = DecodeChar(p, &len);
     if (len <= 0 || p + len > end) break;
+
+    const game::FontBitmap* original = router.OriginalGlyph(code);
+    if (original != nullptr) {
+      // draw_to_pt places the bitmap at the pen after the left bearing and
+      // advances by width + right bearing (plus the left bearing here, matching
+      // Advance()); y is the shared line origin, like the stock renderer.
+      const int glyph_x = pen_x + original->margin_left;
+      if (clip_x1 > 0 && glyph_x + original->width > clip_x1) break;
+      BlitOriginal(*original, dst, glyph_x, y, fg_color, draw_shadow,
+                   shadow_color);
+      pen_x += original->margin_left + original->width + original->margin_right;
+      p += len;
+      continue;
+    }
 
     const Glyph* glyph = ctx->GetGlyph(code);
     if (clip_x1 > 0 && pen_x + glyph->ink_x + glyph->ink_w > clip_x1) break;
