@@ -150,6 +150,14 @@ void Config::Resolve(int game_size, std::string* face, int* render_size,
                      : render_supersample;
 }
 
+bool Config::AsciiOriginal(int game_size) const {
+  const auto it = per_size.find(game_size);
+  if (it != per_size.end() && it->second.has_ascii_original) {
+    return it->second.ascii_original;
+  }
+  return render_ascii_original;
+}
+
 Config ParseConfig(const std::string& toml_text,
                    std::vector<std::string>* problems) {
   Config cfg;
@@ -186,7 +194,10 @@ Config ParseConfig(const std::string& toml_text,
                           std::to_string(kMaxSupersample) + ", ignored");
       }
     }
-    WarnUnknown(*render, "[render]", {"supersample"}, problems);
+    GetBool(*render, "ascii_original", &cfg.render_ascii_original, "[render]",
+            problems);
+    WarnUnknown(*render, "[render]", {"supersample", "ascii_original"},
+                problems);
   } else if (root.get("render") != nullptr) {
     Add(problems, "config: [render] must be a table");
   }
@@ -251,7 +262,11 @@ Config ParseConfig(const std::string& toml_text,
                             std::to_string(kMaxSupersample) + ", ignored");
         }
       }
-      WarnUnknown(*m, path, {"face", "size", "bias", "supersample"}, problems);
+      mapping.has_ascii_original = GetBool(
+          *m, "ascii_original", &mapping.ascii_original, path, problems);
+      WarnUnknown(*m, path,
+                  {"face", "size", "bias", "supersample", "ascii_original"},
+                  problems);
       cfg.per_size[size] = mapping;
     }
   } else if (root.get("fonts") != nullptr) {

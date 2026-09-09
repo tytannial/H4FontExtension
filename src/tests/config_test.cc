@@ -35,6 +35,7 @@ void TestEmptyTextKeepsDefaults() {
   CHECK(cfg.fallback_face == "LiSu");
   CHECK(cfg.default_bias == 4);
   CHECK(cfg.render_supersample == 2);  // branch experimental default
+  CHECK(cfg.render_ascii_original);    // branch experimental default (on)
   CHECK(cfg.per_size.empty());
   std::string face;
   int render = 0;
@@ -256,6 +257,42 @@ void TestPerSizeSupersampleOverride() {
   CHECK(ss == 2);  // rejected override -> global default
 }
 
+void TestAsciiOriginal() {
+  // Global default is on; AsciiOriginal() reports it for sizes with no
+  // [fonts.<size>] entry.
+  const h4cn::Config on = h4cn::ParseConfig("", nullptr);
+  CHECK(on.render_ascii_original);
+  CHECK(on.AsciiOriginal(16));
+
+  // A global false turns it off for every size.
+  std::vector<std::string> p0;
+  const h4cn::Config off =
+      h4cn::ParseConfig("[render]\nascii_original = false\n", &p0);
+  CHECK(p0.empty());
+  CHECK(!off.render_ascii_original);
+  CHECK(!off.AsciiOriginal(8));
+
+  // Per-size override wins over the global, both directions.
+  const h4cn::Config mixed = h4cn::ParseConfig(
+      "[render]\nascii_original = false\n"
+      "[fonts.28]\nascii_original = true\n",
+      nullptr);
+  CHECK(mixed.AsciiOriginal(28));   // size opted back in
+  CHECK(!mixed.AsciiOriginal(16));  // other sizes keep the global false
+
+  const h4cn::Config mixed2 = h4cn::ParseConfig(
+      "[fonts.8]\nascii_original = false\n", nullptr);  // global stays true
+  CHECK(!mixed2.AsciiOriginal(8));
+  CHECK(mixed2.AsciiOriginal(10));
+
+  // Wrong type: rejected with a problem line, global default kept.
+  std::vector<std::string> bad;
+  const h4cn::Config cfg =
+      h4cn::ParseConfig("[render]\nascii_original = 1\n", &bad);
+  CHECK(CountProblems(bad, "'ascii_original' must be true/false") == 1);
+  CHECK(cfg.render_ascii_original);  // 1 is an integer, not a bool -> default
+}
+
 }  // namespace
 
 int main() {
@@ -268,6 +305,7 @@ int main() {
     TestEmptyFacesKeepDefaults();
     TestRenderSupersample();
     TestPerSizeSupersampleOverride();
+    TestAsciiOriginal();
     TestUtf8FaceNameRoundTrips();
     TestOversizedAndNegativeBounds();
     TestUnparseableBiasKeepsMappingUsable();
