@@ -14,9 +14,9 @@ constants, `PascalCase` functions, `snake_case` variables).
 | `game_addrs.h` | every absolute address + each hook's expected prologue and length |
 | `inline_hook.*` | prologue check, patch, trampoline, restore on detach (all 7 pass `orig=nullptr`) |
 | `diagnostics.*` | `OutputDebugStringA` + `plugins\H4CN.log`; startup summary logged every run |
-| `config.*` | H4CN.toml (`toml++`): channel switches + `[render].supersample` (global, per-`t_font::size` overridable) + per-`t_font::size` face/cell overrides |
+| `config.*` | H4CN.toml (`toml++`): channel switches + `[render]` (supersample, ascii_original; both per-size overridable) + per-`t_font::size` face/cell overrides |
 | `font_cache.*` | `FontContext` per (face, size, supersample), advance + pixel caches, font metrics |
-| `blit.*` | 4-bit alpha → RGB565 blend + single-line drawing (`DrawLine`) |
+| `blit.*` | `GlyphRouter` (original-bitmap vs GDI per char, the shared `Advancer`) + 4-bit alpha → RGB565 blend + `DrawLine` |
 | `wrap.*` | line breaking (`WrapText`) via the `Advancer` interface, no game memory — unit-tested |
 | `hooks.*` / `main.cc` | the 7 hooks; one-shot `Initialize()` from `DllMain` + the `zk` export, restore on detach, and the four `Heroes4GL` mod-export stubs |
 
@@ -80,6 +80,18 @@ channel switches; a broken file must only log and fall back to defaults.
   wrapping / height) only reads the advance table, ASCII is primed at context creation, and
   `GetGlyph` is the only path that runs GDI text output. Re-unifying them re-introduces the bug this
   split was made to fix.
+- `GlyphRouter` (`blit.*`) is the single per-character decision of **original-bitmap vs GDI**. When
+  `[render].ascii_original` (default true; per-size overridable) is on, printable ASCII 0x20–0x7E
+  that the live `t_font` actually contains is drawn straight through the game's own
+  `t_font_bitmap::draw_to @0x71B820` (intact — it is *not* one of the seven hooks), a pixel-identical
+  stock blit; the substitute faces are Chinese fonts whose Latin glyphs are the weak point. The range
+  is contiguous (`glyphs[ch - first_char]`; observed first_char 0x1F, count 225 → whole 0x20–0x7E
+  present at every size), but the router still re-checks it and falls back to GDI if a code is absent.
+  The router is BOTH the `Advancer` the width/column/wrap/height hooks measure with AND what
+  `DrawLine` draws with, and the kept-glyph advance (`margin_left+width+margin_right`, no first/last
+  trim) is identical in both, so wrapping can never drift from layout (see the divide-by-zero rule
+  above). Routing is per game size only (`Config::AsciiOriginal`); it never enters the
+  `(face, size, supersample)` context key, and does not affect GBK or supersample of GDI glyphs.
 - One `FontContext` **per (face, rendered size, supersample)**. The game mixes a dozen-plus sizes
   (`t_font::size` observed: 8/10/12/13/15/18/20/21/23/25/26/28 so far, see docs/PROGRESS.md §4.2).
   A single

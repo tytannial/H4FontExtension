@@ -96,7 +96,7 @@
 +0x0C line_height   行高 ← Hook PatchFontMetrics 改写对象
 +0x10 unk10
 +0x14 glyph_count   字形数
-+0x18 glyphs        t_font_bitmap* （数组，紧随一个计数头，new(44*n+4)）
++0x18 glyphs        t_font_bitmap* （数组，紧随一个计数头，new(44*n+4)；ASCII 保原版时直读此表）
 ```
 vftable `??_7t_font@@6B@`@0x988790。
 
@@ -113,6 +113,11 @@ vftable `??_7t_font@@6B@`@0x988790。
 +0x20 bits2  +0x24/28 pad
 ```
 vftable@0x988798（t_font_bitmap）/0x9887A0（t_abstract_bitmap<ubyte> 基）。
+
+插件在 `game_types.h` 里以 `game::FontBitmap`（44B，`static_assert` 锁布局）镜像此结构；「ASCII 保原版」
+（§7.3）直接 `&font->glyphs[ch - first_char]` 取字形，宽度用 `margin_left+width+margin_right`，绘制直调
+未被打补丁的 `t_font_bitmap::draw_to@0x71B820`（`bits` 在载入时已由 `t_font_bitmap::read@0x71BAA0` 把
+1→15/2→-16 转成高/低 nibble，故与我们 blit 的编码同源，像素级复刻原版）。
 
 ### 3.2 函数总表（release ↔ map）
 
@@ -377,6 +382,15 @@ IsGbkTrail(b): 0x40<=b<=0x7E || 0x80<=b<=0xFE
   缓存键相应从 (face, cell) 扩成 **(face, cell, supersample)** 三元组。
   只放大位图：`Measure`/`advance`/`line_height` 仍用 1× 字体（`Rasterize` 结束后在共享 DC 上还原
   `font_`），测宽与换行完全不变，故 #5/#6/#7 行数一致、滚动条不会除零。
+- **ASCII 保原版**（全局 `[render].ascii_original`，本分支默认 **开**，可被 `[fonts.<size>].ascii_original`
+  逐字号覆盖；见 §7.7）：替换字体都是中文字体，拉丁/数字/标点字形是最差的一环；而原版 `.fon` 的字形表
+  是**连续**的 `glyphs[ch - first_char]`（实测各 size first_char=0x1F、glyph_count=225 → 完整覆盖
+  0x20–0x7E）。故可打印 ASCII 直接走游戏**自带且未被 hook** 的 `t_font_bitmap::draw_to@0x71B820` 逐像素
+  复刻（blit 掩码/两遍合成与 §7.5 完全同源），只有 GBK 汉字与原版缺的码位回落 GDI。裁决逻辑集中在
+  `blit.*` 的 **`GlyphRouter`**：它既是 #2/#3/#5/#6/#7 共用的 `Advancer`（kept 码用
+  `margin_left+width+margin_right`，**首末不 trim**），也是 `DrawLine` 的逐字绘制器——测量与绘制走同一
+  个 advance，绝不行数与排版对不上（除零约束同 §7.3 断行条）。routing 仅按 game size 决定，不进
+  (face, cell, supersample) 缓存键，也不影响汉字的 supersample。
 - GBK→UTF-16 显式用 CP 936，渲染不依赖系统 ANSI 代码页。
 
 ### 7.4 GetFontContext / PatchFontMetrics
@@ -410,9 +424,9 @@ clr=(M0&(16*(M1&clr)+nMask*((M1&fg)-(M1&clr))))+(M2&(16*(M3&clr)+nMask*((M3&fg)-
 | `game_addrs.h` | 全部绝对地址 + `HookTarget`（地址 / 长度 / 期望序言），注释里记每个目标的指令长度拆解 |
 | `inline_hook.*` | 序言比对 → 打补丁 → trampoline → `UninstallAllHooks()` 还原原字节；返回失败原因枚举 |
 | `diagnostics.*` | `DiagLog`：每条都 ODS + 追加 `plugins\H4CN.log`（带本地时间戳）；启动小结每次运行写一行（版本 + hook 计数），字体替换/上下文失败也报 |
-| `config.*` | `H4CN.toml`（`deps/toml.hpp` = toml++ 单头，仅此 TU）：`[general]` 通道开关 + `[render].supersample`（全局，可被 `[fonts.<size>].supersample` 逐字号覆盖）+ `[fonts]`/`[fonts.<size>]` face/cell；纯解析 `ParseConfig`（host 可单测）+ `EnsureConfigLoaded`（首帧懒加载，不在 `DllMain`） |
-| `font_cache.*` | 按 (face, cell) 的 `FontContext`（HFONT + 兼容 DC + 32bpp DIB section，实现 `Advancer`）、advance 与像素两级缓存、`GetFontContext`（解析配置并建/缓存）、`PatchFontMetrics` |
-| `blit.*` | 4bit alpha → RGB565 混合（只走墨迹盒）+ `DrawLine`（按字节区间绘制） |
+| `config.*` | `H4CN.toml`（`deps/toml.hpp` = toml++ 单头，仅此 TU）：`[general]` 通道开关 + `[render]`（supersample、ascii_original，均可被 `[fonts.<size>]` 逐字号覆盖）+ `[fonts]`/`[fonts.<size>]` face/cell；纯解析 `ParseConfig`（host 可单测）+ `EnsureConfigLoaded`（首帧懒加载，不在 `DllMain`） |
+| `font_cache.*` | 按 (face, cell, supersample) 的 `FontContext`（HFONT + 兼容 DC + 32bpp DIB section，实现 `Advancer`）、advance 与像素两级缓存、`GetFontContext`（解析配置并建/缓存）、`KeepOriginalAscii`、`PatchFontMetrics` |
+| `blit.*` | `GlyphRouter`（原版位图 vs GDI 的逐字裁决，兼作测量用 `Advancer`）+ 4bit alpha → RGB565 混合（`BlitGlyph` 走墨迹盒 / kept ASCII 直调 `t_font_bitmap::draw_to@0x71B820`）+ `DrawLine` |
 | `wrap.*` | `WrapText`（**唯一**断行实现）+ `WrapTextOptimal`（复刻 0x71C5E0 的 min..max 增长搜索）+ `DecodeChar`；经 `Advancer` 测量，不碰游戏内存/GDI，host 可单测 |
 | `hooks.*` | 7 个 hook 函数 + `InstallHooks()` |
 | `main.cc` | `InitOnceExecuteOnce` 一次性 `Initialize()`：`DllMain` ATTACH 调用；另导出无参无返回的 `zk`（其他注入工具 `GetProcAddress("zk")` 手动加载后调用，重复调用/已初始化则空操作）；DETACH 先还原钩子再释放 GDI/缓存。再加 4 个 `__stdcall` 空实现 `GetName`/`GetMenu`/`SetHWND`/`LoadPackages` 供 `Heroes4GL` 以 `mods\*.mod` 加载（见 §7.2）|
@@ -445,6 +459,11 @@ Hook 之间的分工要点：#1–#7 全部全量替换原实现（`orig` 传 `n
   生效值（per-size > 全局），`GetFontContext` 据此建 (face, cell, ss) 三元组缓存。`1` = 逐位复刻 v3.1.0
   观感（稳定基线，小字号建议点对点更锐利），`2` = 全局实验默认。越界/非整数按坏值忽略回落。合并回
   master 前须决定是否把全局默认改回 1（AGENTS「缺省复刻旧行为」）。
+- `[render].ascii_original`（全局，bool，默认 **true**）+ 可选 `[fonts.<size>].ascii_original`（逐字号
+  覆盖）：可打印 ASCII 0x20–0x7E 是否用原版 `.fon` 位图绘制，详见 §7.3「ASCII 保原版」条。
+  `Config::AsciiOriginal(game_size)` 输出最终生效值（per-size > 全局），`GlyphRouter` 据此逐字决定
+  原版 vs GDI（并做 `first_char..glyph_count` 范围回落）。`false` = ASCII 也走 GDI 替换字体（v3.1.0 做法）。
+  合并回 master 前须决定是否把默认改回 false（AGENTS「缺省复刻旧行为」）。
 
 
 ## 8. 已知问题的技术分析

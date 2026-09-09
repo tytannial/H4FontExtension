@@ -29,6 +29,16 @@ patch_line_height = true
 # (见下):太小的字点对点反而更清晰锐利。改完重启游戏生效。
 supersample = 2
 
+# 可打印 ASCII(0x20–0x7E:空格、0-9、字母、/ , . % 等)是否用**原版位图**绘制。
+# 替换字体都是中文字体,它们的拉丁/数字/标点字形恰恰最难看;而原版 .fon 里这段
+# 字形是英文原版游戏的样子(实测各字号字形表 first_char=0x1F、count=225,完整覆盖
+# 0x20–0x7E)。开启后这些字符走游戏自带的 blitter 逐像素复刻原版,只有 GBK 汉字
+# 和原版缺的码位才用 GDI。
+#   true  = 默认;ASCII 保持原版(数字/x/x/百分比/英文最清晰)
+#   false = ASCII 也用替换字体的 GDI 字形(v3.1.0 的做法)
+# 只改这些字符的绘制与测宽,不影响汉字。可按字号覆盖(见 [fonts.<size>])。
+ascii_original = true
+
 [fonts]
 # 所有游戏字号默认使用的替换字体(UTF-8 字体名,如 "LiSu" 隶书、"SimHei" 黑体、
 # "Microsoft YaHei" 微软雅黑)。需系统已安装该字体,否则 Windows 会静默替换,
@@ -43,12 +53,13 @@ default_bias = 4
 # 没写进配置的 size 照样工作(走 fallback + default_bias),并会在 H4CN.log 里
 # 以 `game size NN -> ...` 出现,照它补配置即可。
 #
-# 每个表里四个键都可选。size/bias 优先级:size > bias > [fonts].default_bias:
-#   face        = "字体名"  该字号换用的 GDI 字体(省略 = fallback_face)
-#   size        = N         直接指定 GDI 像素高(1..256)
-#   bias        = K         该字号的 size+K 偏置
-#   supersample = N         该字号的超采样倍数(1..4),覆盖 [render].supersample;
-#                           1 = 这个字号回到点对点原始光栅(小字更锐利常用)
+# 每个表里五个键都可选。size/bias 优先级:size > bias > [fonts].default_bias:
+#   face          = "字体名"  该字号换用的 GDI 字体(省略 = fallback_face)
+#   size          = N         直接指定 GDI 像素高(1..256)
+#   bias          = K         该字号的 size+K 偏置
+#   supersample   = N         该字号超采样倍数(1..4),覆盖 [render].supersample;
+#                             1 = 这个字号回到点对点原始光栅(小字更锐利常用)
+#   ascii_original = true/  false  覆盖 [render].ascii_original(该字号 ASCII 是否用原版位图)
 
 # 例:最大的标题字(资源名义 28)换黑体并加大到 35 px:
 [fonts.28]
@@ -98,11 +109,11 @@ bias = 3
 face = "LiSu"
 
 [fonts.10]
-bias = 3
+bias = 0
 face = "SimSun"
 supersample = 1
 
 [fonts.8]
-bias = 2
+bias = 0
 face = "SimSun"
 supersample = 1

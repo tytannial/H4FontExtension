@@ -44,10 +44,11 @@ size + 4 px); a broken or unknown value only produces a line in
 `plugins\H4CN.log` and falls back to its default — never a crash.
 
 See [`H4CN.example.toml`](H4CN.example.toml) for the full annotated schema:
-`[general]` channel switches, a global `[render].supersample` glyph-AA factor,
-`[fonts]` defaults, and per-size `[fonts.<size>] face/size/bias/supersample`
-overrides keyed by the game's nominal font size (the `H4CN.log` lists the
-sizes it actually observed each run).
+`[general]` channel switches; a global `[render].supersample` glyph-AA factor
+and `[render].ascii_original` (keep printable ASCII on the original .fon
+bitmaps); `[fonts]` defaults; and per-size `[fonts.<size>]
+face/size/bias/supersample/ascii_original` overrides keyed by the game's nominal
+font size (the `H4CN.log` lists the sizes it actually observed each run).
 
 ## Compatibility and known limitations
 
