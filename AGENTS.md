@@ -42,6 +42,11 @@ CRT is the default `/MD` (and `/MDd` for Debug): **Release needs the VC++ 2015-2
 redistributable on the player's machine, and the Debug `.asi` cannot load without VS installed —
 never ship Debug.**
 
+If an incremental build ignores a header/`version.h` change ("ninja: no work to do"), the
+`.ninja_deps` database lost the `/showIncludes` entries (happens when a bad PATH `ninja`/`cmake`
+compiles objects outside `build.ps1`): check with `<VS>\...\Ninja\ninja.exe -C out/build/x86-<cfg>
+-t deps CMakeFiles/H4CN.dir/<obj>` (`#deps 0`), fix with `./build.ps1 -Config <cfg> -Clean`.
+
 ## Verify (only loop that exists)
 
 Copy `H4CN.asi` into your game folder's **`plugins\`** (`-DeployDir` does it on every build) and run
