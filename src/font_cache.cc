@@ -3,6 +3,8 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -32,6 +34,9 @@ constexpr int kFirstAscii = 0x20;
 constexpr int kLastAscii = 0x7E;
 constexpr size_t kGlyphBucketReserve = 4096;
 
+// Guards the context map only (creation/clearing in GetFontContext's cold
+// path, Init/Shutdown). Glyph-cache locking is per-context since the memo
+// took the map lookup off the hot path.
 std::mutex g_mutex;
 
 // Defensive ceiling for the configured supersample factor; the config layer
@@ -47,6 +52,37 @@ constexpr int kSupersampleCeil = 4;
 // (face, cell) but wanting different Nx must not collide onto one context.
 std::map<std::tuple<std::string, int, int>, std::unique_ptr<FontContext>>*
     g_contexts = nullptr;
+
+// game size -> FontContext* memo (the hot path).
+//
+// Every hooked call resolves its font through GetFontContext, and 9 of the
+// get_width call sites sit in per-frame paths. The full resolution builds a
+// face string, a (string,int,int) tuple and searches the map under the lock -
+// pure overhead once the answer is known. H4CN.toml is immutable after
+// EnsureConfigLoaded, so (game size -> context) is fixed for the whole
+// process and the size alone is a complete key. Failed lookups are memoised
+// too (kMemoFailed), so a dead size cannot re-pay the cold path per call.
+//
+// Tagged pointer: an aligned FontContext* never equals 0 or 1. The release
+// store pairs with the acquire load so a thread that sees the pointer also
+// sees the fully-constructed FontContext. ShutdownFontCache resets every
+// entry, so no stale pointer survives a re-init.
+constexpr int kMemoMaxSize = 256;  // config caps sizes at 256; observed <= 28
+constexpr uintptr_t kMemoFailed = 1;
+std::atomic<uintptr_t> g_size_memo[kMemoMaxSize + 1];
+
+void MemoPublish(int game_size, FontContext* ctx) {
+  if (game_size < 1 || game_size > kMemoMaxSize) return;
+  g_size_memo[game_size].store(
+      ctx == nullptr ? kMemoFailed : reinterpret_cast<uintptr_t>(ctx),
+      std::memory_order_release);
+}
+
+void MemoReset() {
+  for (std::atomic<uintptr_t>& slot : g_size_memo) {
+    slot.store(0, std::memory_order_relaxed);
+  }
+}
 
 // Converts one decoded character back to UTF-16. Returns 0 when the sequence is
 // not valid GBK, which leaves the glyph blank rather than drawing a best-fit
@@ -76,14 +112,49 @@ std::wstring Utf8ToWide(const std::string& utf8) {
   return wide;
 }
 
-// GDI reports the *installed* face's name, which Windows localises: on a
-// zh-CN system LiSu comes back as 隶书 even with no substitution at all. The
-// pair is hardcoded because it is the shipped default; other faces with
-// localised names may produce a spurious (log-only) warning.
+// The inverse. printf's %S must NOT be used for wide names in these messages:
+// under the default "C" locale it converts nothing and sprintf_s leaves the
+// buffer empty, which is how the SimSun-substitution warning surfaced as the
+// empty "H4CN: " line in a real player's log.
+std::string WideToUtf8(const wchar_t* wide) {
+  std::string out;
+  const int len = WideCharToMultiByte(kUtf8CodePage, 0, wide, -1, nullptr, 0,
+                                      nullptr, nullptr);
+  if (len > 1) {
+    out.resize(static_cast<size_t>(len) - 1);
+    WideCharToMultiByte(kUtf8CodePage, 0, wide, -1, out.data(), len, nullptr,
+                        nullptr);
+  }
+  return out;
+}
+
+// GDI reports the *installed* face's name, and Windows localises it: on a
+// zh-CN system LiSu comes back as 隶书, SimSun as 宋体 - the same face, no
+// substitution at all. Without these aliases H4CN.toml faces whose ASCII name
+// differs from the registered localised name would log a spurious warning (a
+// real player log showed the one that was hardcoded firing for SimSun).
 bool IsSameFace(const wchar_t* actual, const wchar_t* requested) {
   if (lstrcmpiW(actual, requested) == 0) return true;
-  return lstrcmpiW(requested, L"LiSu") == 0 &&
-         lstrcmpW(actual, L"\u96B6\u4E66") == 0;
+  struct FaceAlias {
+    const wchar_t* ascii;
+    const wchar_t* localized;
+  };
+  static constexpr FaceAlias kAliases[] = {
+      {L"LiSu", L"\u96B6\u4E66"},                         // 隶书
+      {L"SimSun", L"\u5B8B\u4F53"},                       // 宋体
+      {L"NSimSun", L"\u65B0\u5B8B\u4F53"},                // 新宋体
+      {L"SimHei", L"\u9ED1\u4F53"},                       // 黑体
+      {L"Microsoft YaHei", L"\u5FAE\u8F6F\u96C5\u9ED1"},  // 微软雅黑
+      {L"KaiTi", L"\u6977\u4F53"},                        // 楷体
+      {L"FangSong", L"\u4EFF\u5B8B"},                     // 仿宋
+  };
+  for (const FaceAlias& alias : kAliases) {
+    if (lstrcmpiW(requested, alias.ascii) == 0 &&
+        lstrcmpW(actual, alias.localized) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Windows silently replaces a missing face with a fallback; the metrics and
@@ -97,9 +168,11 @@ void ReportFaceSubstitution(HDC dc, const wchar_t* requested) {
   if (GetTextFaceW(dc, 64, actual) == 0) return;
   if (IsSameFace(actual, requested)) return;
   reported = true;
-  char message[256];
-  sprintf_s(message, "font '%S' unavailable, substituted by '%S'", requested,
-            actual);
+  const std::string requested_utf8 = WideToUtf8(requested);
+  const std::string actual_utf8 = WideToUtf8(actual);
+  char message[320];  // 64 wchars per name can occupy 3x the bytes in UTF-8
+  sprintf_s(message, "font '%s' unavailable, substituted by '%s'",
+            requested_utf8.c_str(), actual_utf8.c_str());
   DiagLog(message);
 }
 
@@ -341,7 +414,11 @@ void FontContext::Rasterize(Glyph* glyph, uint32_t code) {
 }
 
 int FontContext::Advance(uint32_t code) {
-  std::lock_guard<std::mutex> lock(g_mutex);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return AdvanceLocked(code);
+}
+
+int FontContext::AdvanceLocked(uint32_t code) {
   if (!valid_) return 0;
   Glyph& glyph = glyphs_[code];
   if (!glyph.measured) {
@@ -352,7 +429,11 @@ int FontContext::Advance(uint32_t code) {
 }
 
 const Glyph* FontContext::GetGlyph(uint32_t code) {
-  std::lock_guard<std::mutex> lock(g_mutex);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  return GetGlyphLocked(code);
+}
+
+const Glyph* FontContext::GetGlyphLocked(uint32_t code) {
   Glyph& glyph = glyphs_[code];
   if (!valid_) return &glyph;
   if (!glyph.measured) {
@@ -360,6 +441,7 @@ const Glyph* FontContext::GetGlyph(uint32_t code) {
     glyph.measured = true;
   }
   if (!glyph.rasterized) {
+    ScopedPerf perf(kPerfGlyphRasterize);
     Rasterize(&glyph, code);
     glyph.rasterized = true;
   }
@@ -367,17 +449,36 @@ const Glyph* FontContext::GetGlyph(uint32_t code) {
 }
 
 FontContext* GetFontContext(const game::Font& font) {
-  // Outside DllMain by construction (the first hooked call), so the config
-  // read cannot deadlock the loader; subsequent calls are a no-op.
+  const int game_size = font.size > 0 ? font.size : kFallbackFontSize;
+
+  // Hot path: a previously resolved size returns straight from the memo, no
+  // config re-read, no string/tuple, no lock. Only an acquire load + bounds
+  // check. Unresolved sizes (0) and failed sizes (kMemoFailed) fall through.
+  if (game_size >= 1 && game_size <= kMemoMaxSize) {
+    const uintptr_t memo =
+        g_size_memo[game_size].load(std::memory_order_acquire);
+    if (memo > kMemoFailed) {
+      return reinterpret_cast<FontContext*>(memo);
+    }
+    if (memo == kMemoFailed) {
+      return nullptr;
+    }
+  }
+
+  // Cold path, once per game size: ensure the config is read (the first call
+  // happens on a game thread, never in DllMain), resolve the size through
+  // H4CN.toml, and find-or-create the context.
   EnsureConfigLoaded();
   const Config& config = GetConfig();
 
-  const int game_size = font.size > 0 ? font.size : kFallbackFontSize;
   std::string face;
   int render_size = 0;
   int supersample = 1;
   config.Resolve(game_size, &face, &render_size, &supersample);
-  if (face.empty() || render_size <= 0) return nullptr;
+  if (face.empty() || render_size <= 0) {
+    MemoPublish(game_size, nullptr);  // permanent config-resolution failure
+    return nullptr;
+  }
 
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_contexts == nullptr) return nullptr;  // InitFontCache() never ran
@@ -408,7 +509,9 @@ FontContext* GetFontContext(const game::Font& font) {
   // A context that failed to create stays in the map: returning it once and
   // then null forever beats retrying CreateFont on every draw call.
   FontContext* ctx = it->second.get();
-  return ctx->valid() ? ctx : nullptr;
+  FontContext* result = ctx->valid() ? ctx : nullptr;
+  MemoPublish(game_size, result);
+  return result;
 }
 
 bool KeepOriginalAscii(const game::Font& font) {
@@ -427,6 +530,7 @@ void PatchFontMetrics(game::Font* font, int line_height) {
 
 void InitFontCache() {
   std::lock_guard<std::mutex> lock(g_mutex);
+  MemoReset();
   if (g_contexts == nullptr) {
     g_contexts = new (std::nothrow) std::map<std::tuple<std::string, int, int>,
                                              std::unique_ptr<FontContext>>();
@@ -435,6 +539,9 @@ void InitFontCache() {
 
 void ShutdownFontCache() {
   std::lock_guard<std::mutex> lock(g_mutex);
+  // The memoised FontContext* die with the map; clear first so a re-Init can
+  // never hand out a dangling pointer.
+  MemoReset();
   if (g_contexts == nullptr) return;
   // Releases every FontContext, its glyph pixels and its GDI objects.
   g_contexts->clear();

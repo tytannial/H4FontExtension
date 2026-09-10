@@ -14,6 +14,7 @@
 //   log_file          = true   # append to H4CN.log
 //   log_debug_view    = true   # OutputDebugStringA
 //   patch_line_height = true   # write the measured tmHeight back to the game
+//   perf_log          = false  # self-timing: one summary line per 2048 calls
 //
 //   [render]
 //   supersample = 2            # default Nx supersampling; a [fonts.<size>]
@@ -61,6 +62,10 @@ struct Config {
   bool log_file = true;
   bool log_debug_view = true;
   bool patch_line_height = true;
+  // Self-timing: one summary line per 2048 calls of a hooked entry into
+  // H4CN.log. Off by default; when off the hooks pay only a bool load. This is
+  // the instrument for the optimisation work - measure, never guess.
+  bool perf_log = false;
 
   // [render]
   // Default supersampling factor for glyph rasterisation. The glyph is rendered

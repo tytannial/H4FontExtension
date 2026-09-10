@@ -41,8 +41,19 @@ class GlyphRouter : public Advancer {
   // `ctx` (the GDI substitute) and `font` (the live t_font, whose original
   // glyph table is read) must outlive the router; both are non-null in every
   // hook.
-  GlyphRouter(FontContext* ctx, const game::Font* font, bool ascii_original)
-      : ctx_(ctx), font_(font), ascii_original_(ascii_original) {}
+  //
+  // When `locked` is true the caller already holds `ctx`'s lock for the whole
+  // pass (the hooks batch-lock it), so the GDI-side measurement and rasterise
+  // go through the lock-free FontContext variants - one lock for the line
+  // instead of one per character. The routing decision and the advances are
+  // identical either way, so a batched draw can never drift from a batched
+  // wrap.
+  GlyphRouter(FontContext* ctx, const game::Font* font, bool ascii_original,
+              bool locked = false)
+      : ctx_(ctx),
+        font_(font),
+        ascii_original_(ascii_original),
+        locked_(locked) {}
 
   FontContext* context() const { return ctx_; }
 
@@ -50,6 +61,12 @@ class GlyphRouter : public Advancer {
   // kept glyph, GDI advance otherwise. Kept glyphs use the same no-trim model
   // as GDI ones (margin_left + width + margin_right summed per character).
   int Advance(uint32_t code) override;
+
+  // The GDI substitute glyph for `code`, rasterising on first use. Routed
+  // through the router so a batched pass does not re-lock per character.
+  const Glyph* Glyph(uint32_t code) {
+    return locked_ ? ctx_->GetGlyphLocked(code) : ctx_->GetGlyph(code);
+  }
 
   // The original bitmap cell to draw `code` with, or null when it should go
   // through GDI. Non-null only when ASCII-original is on, `code` is a decoded
@@ -61,6 +78,7 @@ class GlyphRouter : public Advancer {
   FontContext* ctx_;
   const game::Font* font_;
   bool ascii_original_;
+  bool locked_;
 };
 
 // Draws one wrapped line with its first character's pen at (x, y), routing each

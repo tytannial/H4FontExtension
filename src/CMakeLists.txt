@@ -44,7 +44,27 @@ target_include_directories(H4CN PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(H4CN PRIVATE /W4 /permissive-)
+    # /utf-8: sources are UTF-8 without BOM (font-alias comments carry CJK);
+    # without it cl.exe assumes the ANSI codepage and every such file gets a
+    # C4819 warning. All narrow *literals* are ASCII, so the execution charset
+    # change is inert; CJK names reach the log via WideCharToMultiByte at
+    # runtime, not through literals.
+    target_compile_options(H4CN PRIVATE /W4 /permissive- /utf-8)
+endif()
+
+# Whole-program optimisation (/GL + /LTCG) for the shipped Release build only.
+# It lets the compiler inline across the module - most valuably turning the
+# virtual Advancer::Advance call in the WrapText measurement loop into a direct
+# GlyphRouter::Advance, and the per-character original/GDI routing check, which
+# is the hot path for every width/wrap/height pass. Debug is left untouched (it
+# is never shipped) so breakpoints and step-through keep working. check_ipo_
+# supported guards toolchains without LTCG; Ninja+MSVC has it.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT H4CN_IPO_SUPPORTED OUTPUT H4CN_IPO_OUTPUT)
+if(H4CN_IPO_SUPPORTED)
+    set_target_properties(H4CN PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+else()
+    message(STATUS "IPO not supported, Release builds without LTCG: ${H4CN_IPO_OUTPUT}")
 endif()
 
 # gdi32 renders the glyphs, user32 hands out the screen DC (GetDC/ReleaseDC) and
@@ -79,7 +99,7 @@ if(H4CN_BUILD_TESTS)
         WIN32_LEAN_AND_MEAN
     )
     if(MSVC)
-        target_compile_options(wrap_tests PRIVATE /W4 /permissive-)
+        target_compile_options(wrap_tests PRIVATE /W4 /permissive- /utf-8)
     endif()
     add_test(NAME wrap_tests COMMAND wrap_tests)
 
@@ -99,7 +119,7 @@ if(H4CN_BUILD_TESTS)
         WIN32_LEAN_AND_MEAN
     )
     if(MSVC)
-        target_compile_options(config_tests PRIVATE /W4 /permissive-)
+        target_compile_options(config_tests PRIVATE /W4 /permissive- /utf-8)
     endif()
     add_test(NAME config_tests COMMAND config_tests)
 endif()

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "blit.h"
@@ -77,10 +78,14 @@ void __fastcall HookFontDrawToPt(game::Font* font, uint32_t /*edx*/,
                                  game::Bitmap* dst, int x, int y,
                                  const uint8_t* str, uint16_t fg_color,
                                  uint8_t draw_shadow, uint16_t shadow_color) {
+  ScopedPerf perf(kPerfDrawToPt);
   if (str == nullptr || *str == 0 || dst == nullptr) return;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
   const Line line{
       str, static_cast<int>(std::strlen(reinterpret_cast<const char*>(str)))};
@@ -103,10 +108,14 @@ void __fastcall HookFontDrawToPt(game::Font* font, uint32_t /*edx*/,
 // ---------------------------------------------------------------------------
 int __fastcall HookFontGetWidth(game::Font* font, uint32_t /*edx*/,
                                 const uint8_t* str) {
+  ScopedPerf perf(kPerfGetWidth);
   if (str == nullptr || *str == 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
   int total = 0;
   for (const uint8_t* p = str; *p != 0;) {
@@ -124,10 +133,14 @@ int __fastcall HookFontGetWidth(game::Font* font, uint32_t /*edx*/,
 // ---------------------------------------------------------------------------
 int __fastcall HookFontGetColumn(game::Font* font, uint32_t /*edx*/,
                                  const uint8_t* str, int max_width) {
+  ScopedPerf perf(kPerfGetColumn);
   if (str == nullptr || *str == 0 || max_width <= 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
   int used = 0;
   int bytes = 0;
@@ -159,12 +172,23 @@ int __fastcall HookFontGetColumn(game::Font* font, uint32_t /*edx*/,
 int __fastcall HookFontWrapTextMm(game::Font* font, uint32_t /*edx*/,
                                   game::StringVector* lines, const uint8_t* str,
                                   int min_width, int max_width) {
+  ScopedPerf perf(kPerfWrapTextMm);
   if (lines == nullptr) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr || str == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
-  std::vector<Line> wrapped;
+  // Reused line buffer: draw_to_rect is the per-frame combat-label path and
+  // WrapText push_backs one Line per visible row, so a fresh vector here paid
+  // a malloc/free on every frame. thread_local + clear() keeps one warm
+  // capacity per hook per thread; the hook bodies never re-enter each other
+  // (they call GDI, the intact game blitter and the VC6 container helpers
+  // only), so no second user of the same buffer can exist on a thread.
+  static thread_local std::vector<Line> wrapped;
+  wrapped.clear();
   const OptimalWrap optimal = WrapTextOptimal(
       str, min_width, max_width, ctx->line_height(), router, &wrapped);
   WriteLines(lines, wrapped);
@@ -180,12 +204,17 @@ int __fastcall HookFontWrapTextMm(game::Font* font, uint32_t /*edx*/,
 int __fastcall HookFontWrapText(game::Font* font, uint32_t /*edx*/,
                                 game::StringVector* lines, const uint8_t* str,
                                 int width) {
+  ScopedPerf perf(kPerfWrapText);
   if (lines == nullptr) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr || str == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
-  std::vector<Line> wrapped;
+  static thread_local std::vector<Line> wrapped;
+  wrapped.clear();
   const WrapResult result = WrapText(str, width, router, &wrapped);
   WriteLines(lines, wrapped);
   return result.max_width;
@@ -203,6 +232,7 @@ int __fastcall HookFontDrawToRect(game::Font* font, uint32_t /*edx*/,
                                   game::Bitmap* dst, game::Rect* rect,
                                   const uint8_t* str, uint16_t fg_color,
                                   uint8_t draw_shadow, uint16_t shadow_color) {
+  ScopedPerf perf(kPerfDrawToRect);
   if (str == nullptr || *str == 0 || dst == nullptr || rect == nullptr) {
     return 0;
   }
@@ -212,14 +242,18 @@ int __fastcall HookFontDrawToRect(game::Font* font, uint32_t /*edx*/,
 
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
-  std::vector<Line> lines;
-  WrapText(str, width, router, &lines);
+  static thread_local std::vector<Line> wrapped;
+  wrapped.clear();
+  WrapText(str, width, router, &wrapped);
 
   const int line_height = ctx->line_height();
   int y = rect->y;
-  for (const Line& line : lines) {
+  for (const Line& line : wrapped) {
     if (y + line_height > rect->y1) break;  // same cut-off as draw_to_vector
     DrawLine(line, dst, rect->x, y, router, fg_color, draw_shadow != 0,
              shadow_color, rect->x1);
@@ -239,10 +273,14 @@ int __fastcall HookFontDrawToRect(game::Font* font, uint32_t /*edx*/,
 // ---------------------------------------------------------------------------
 int __fastcall HookFontGetWrappedHeight(game::Font* font, uint32_t /*edx*/,
                                         const uint8_t* str, int width) {
+  ScopedPerf perf(kPerfGetWrappedHeight);
   if (str == nullptr || *str == 0 || width <= 0) return 0;
   FontContext* ctx = PrepareContext(font);
   if (ctx == nullptr) return 0;
-  GlyphRouter router(ctx, font, KeepOriginalAscii(*font));
+  // One lock for the whole pass; the locked-mode router skips the per-char
+  // re-acquire (see FontContext::Lock / GlyphRouter, blit.h + font_cache.h).
+  std::lock_guard<FontContext> batch(*ctx);
+  GlyphRouter router(ctx, font, KeepOriginalAscii(*font), /*locked=*/true);
 
   const WrapResult result = WrapText(str, width, router, /*lines=*/nullptr);
   return result.line_count * ctx->line_height();

@@ -13,9 +13,9 @@ constants, `PascalCase` functions, `snake_case` variables).
 | `game_types.h` | game structs, `static_assert`-locked layouts |
 | `game_addrs.h` | every absolute address + each hook's expected prologue and length |
 | `inline_hook.*` | prologue check, patch, trampoline, restore on detach (all 7 pass `orig=nullptr`) |
-| `diagnostics.*` | `OutputDebugStringA` + `plugins\H4CN.log`; startup summary logged every run |
+| `diagnostics.*` | `OutputDebugStringA` + `plugins\H4CN.log`; startup summary logged every run; opt-in `[general].perf_log` self-timing slots (one summary line per 2048 calls per hook) |
 | `config.*` | H4CN.toml (`toml++`): channel switches + `[render]` (supersample, ascii_original; both per-size overridable) + per-`t_font::size` face/cell overrides |
-| `font_cache.*` | `FontContext` per (face, size, supersample), advance + pixel caches, font metrics |
+| `font_cache.*` | `FontContext` per (face, size, supersample), advance + pixel caches, game-size→context memo (lock-free fast path), per-context recursive lock |
 | `blit.*` | `GlyphRouter` (original-bitmap vs GDI per char, the shared `Advancer`) + 4-bit alpha → RGB565 blend + `DrawLine` |
 | `wrap.*` | line breaking (`WrapText`) via the `Advancer` interface, no game memory — unit-tested |
 | `hooks.*` / `main.cc` | the 7 hooks; one-shot `Initialize()` from `DllMain` + the `zk` export, restore on detach, and the four `Heroes4GL` mod-export stubs |

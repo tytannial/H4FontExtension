@@ -32,6 +32,7 @@ void TestEmptyTextKeepsDefaults() {
   CHECK(cfg.log_file);
   CHECK(cfg.log_debug_view);
   CHECK(cfg.patch_line_height);
+  CHECK(!cfg.perf_log);  // self-timing is opt-in; the hooks stay untouched off
   CHECK(cfg.fallback_face == "LiSu");
   CHECK(cfg.default_bias == 4);
   CHECK(cfg.render_supersample == 2);  // branch experimental default
@@ -51,6 +52,7 @@ void TestFullSchema() {
       "log_file = false\n"
       "log_debug_view = true\n"
       "patch_line_height = false\n"
+      "perf_log = true\n"
       "[render]\n"
       "supersample = 3\n"
       "[fonts]\n"
@@ -65,6 +67,7 @@ void TestFullSchema() {
   const h4cn::Config cfg = h4cn::ParseConfig(text, &problems);
   CHECK(problems.empty());
   CHECK(!cfg.log_file && cfg.log_debug_view && !cfg.patch_line_height);
+  CHECK(cfg.perf_log);
   CHECK(cfg.render_supersample == 3);
   CHECK(cfg.fallback_face == "SimHei");
   CHECK(cfg.default_bias == 6);

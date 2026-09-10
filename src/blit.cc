@@ -124,7 +124,7 @@ int GlyphRouter::Advance(uint32_t code) {
     // laying out can never drift apart.
     return glyph->margin_left + glyph->width + glyph->margin_right;
   }
-  return ctx_->Advance(code);
+  return locked_ ? ctx_->AdvanceLocked(code) : ctx_->Advance(code);
 }
 
 void DrawLine(const Line& line, game::Bitmap* dst, int x, int y,
@@ -158,7 +158,7 @@ void DrawLine(const Line& line, game::Bitmap* dst, int x, int y,
       continue;
     }
 
-    const Glyph* glyph = ctx->GetGlyph(code);
+    const Glyph* glyph = router.Glyph(code);
     if (clip_x1 > 0 && pen_x + glyph->ink_x + glyph->ink_w > clip_x1) break;
 
     BlitGlyph(*glyph, dst, pen_x, y, fg_color, draw_shadow, shadow_color);

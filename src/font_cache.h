@@ -11,6 +11,7 @@
 #define H4CN_FONT_CACHE_H_
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -76,10 +77,35 @@ class FontContext : public Advancer {
   // call that could clear the cache.
   const Glyph* GetGlyph(uint32_t code);
 
+  // Lock-free variants. The caller must already hold this context's lock (the
+  // hooks batch-lock it once per pass and build their GlyphRouter in locked
+  // mode). Using these without the lock is a data race; they exist so a
+  // whole wrap/draw pass takes the lock once instead of once per character.
+  int AdvanceLocked(uint32_t code);
+  const Glyph* GetGlyphLocked(uint32_t code);
+
+  // Lockable for `std::lock_guard<FontContext>`: the hooks batch-lock one
+  // context for the whole wrap/draw pass, so a 200-character measurement pays
+  // one lock instead of 200. Recursive because Advance/GetGlyph keep their
+  // own guards for callers that do not batch - a hook holding this lock
+  // re-enters them on the same thread. It serialises the glyph caches and the
+  // shared GDI DC of *this* context; contexts for other sizes are unaffected.
+  // The lowercase names are the std Mutex requirement, not a style slip.
+  void lock() { mutex_.lock(); }
+  void unlock() { mutex_.unlock(); }
+  bool try_lock() { return mutex_.try_lock(); }
+
  private:
-  // All private helpers run with the module lock already held.
+  // All private helpers run with this context's lock already held (Advance /
+  // GetGlyph acquire it; the hooks batch-acquire it around a whole pass).
   void Measure(Glyph* glyph, uint32_t code);
   void Rasterize(Glyph* glyph, uint32_t code);
+
+  // Per-context recursive lock guarding glyphs_ and the shared GDI DC.
+  // Per-context (not one global lock) so the dozens of live sizes never contend
+  // with each other; recursive so a hook that batch-locks can still call
+  // Advance/GetGlyph, which keep their own guards.
+  std::recursive_mutex mutex_;
 
   std::string face_utf8_;
   int render_size_ = 0;

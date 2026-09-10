@@ -177,8 +177,10 @@ Config ParseConfig(const std::string& toml_text,
     GetBool(*gen, "log_debug_view", &cfg.log_debug_view, "[general]", problems);
     GetBool(*gen, "patch_line_height", &cfg.patch_line_height, "[general]",
             problems);
+    GetBool(*gen, "perf_log", &cfg.perf_log, "[general]", problems);
     WarnUnknown(*gen, "[general]",
-                {"log_file", "log_debug_view", "patch_line_height"}, problems);
+                {"log_file", "log_debug_view", "patch_line_height", "perf_log"},
+                problems);
   } else if (root.get("general") != nullptr) {
     Add(problems, "config: [general] must be a table");
   }
@@ -339,6 +341,7 @@ void EnsureConfigLoaded() {
     // Applying the channels also flushes everything buffered so far, including
     // the hook-install summary, under the switches this file just chose.
     DiagApplyChannels(cfg.log_file, cfg.log_debug_view);
+    PerfSetEnabled(cfg.perf_log);
     for (const std::string& problem : problems) {
       DiagLog(problem.c_str());
     }

@@ -58,7 +58,13 @@ OptimalWrap WrapTextOptimal(const uint8_t* text, int min_width, int max_width,
   if (min_width > width) width = min_width;
 
   WrapResult result;
-  std::vector<Line> wrapped;
+  // Reusable scratch rows: the growth loop re-wraps the whole text once per
+  // width step, and this is the only place those rows exist between steps.
+  // The caller gets a copy-assign at the end - Line is a trivial {ptr,len}
+  // view, copying a dozen of them is cheaper than the malloc a move-out would
+  // leave the scratch to re-pay on the next call. thread_local keeps it safe
+  // with no shared state; WrapText itself stays pure.
+  static thread_local std::vector<Line> wrapped;
   for (;;) {
     wrapped.clear();
     result = WrapText(text, width, advancer, &wrapped);
@@ -73,7 +79,7 @@ OptimalWrap WrapTextOptimal(const uint8_t* text, int min_width, int max_width,
     if (width > upper) width = upper;
   }
 
-  if (lines != nullptr) *lines = std::move(wrapped);
+  if (lines != nullptr) *lines = wrapped;
   optimal.width = width;
   optimal.result = result;
   return optimal;

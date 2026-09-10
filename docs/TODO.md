@@ -94,13 +94,31 @@ P0 复验新增点位：走 `sub_8CAE90` 的弹框——宽度随内容变、中
 
 ---
 
-## P4 剩余热点开销（**等 P0 实测后再决定，别凭猜优化**）
+## P4 性能优化（分支 feat/perf-optimization，2026-09-10：代码完成，待游戏内 perf 实测）
 
-| 项 | 位置 | 说明 |
+测量通道已落地：`[general].perf_log`（默认 off）——7 个 Hook 入口与字形光栅化各带一个 QPC
+计时槽（`diagnostics.*` 的 `ScopedPerf`/`PerfRecord`），每累计 2048 次向 H4CN.log 出一行
+`perf: <名称> n=… avg=…us max=…us total=…ms`。关闭时热路径只多读一个 bool。基线/回归对比
+都以此为据，勿凭猜优化。
+
+| 项 | 位置 | 状态 |
 |---|---|---|
-| 逐字符加锁 | `font_cache.cc` Advance/GetGlyph 各一次 `lock_guard`；`wrap.cc` 每字调一次 | 未竞争 mutex 约几十周期，长文本可感知。可给 `FontContext` 加显式 `Lock()/Unlock()`，在 `WrapText`/`DrawLine` 外层批量持有 |
-| 每次调用现构 `std::vector<Line>` | `hooks.cc` HookFontWrapText / HookFontDrawToRect | `draw_to_rect` = 战斗标签每帧；可用 thread_local 复用缓冲 |
-| 同一段文本被断两次 | `t_text_window_update_layout@0x885FF0` 先 `wrap_text` 再 `get_wrapped_height` | 可对 (face, render_size, text ptr, width) 做 1 条 memo；风险：文本缓冲会被就地改（`set_text` 之后指针内容变），失效条件要严格 |
+| 每次 hook 调用重做 string+tuple+map 解析 context | `font_cache.cc` `GetFontContext` | ✅ 已做：`game_size → FontContext*` memo（tagged atomic 指针，release 发布；失败 size 也缓存）。仅 miss 一次走原 Resolve+map；`Init/ShutdownFontCache` 同步清空 |
+| 逐字符加全局锁 | `font_cache.*` `blit.*` `hooks.cc` | ✅ 已做：锁改为**每 context** 的 `recursive_mutex`；hook 整体 `lock_guard<FontContext>` 一次，`GlyphRouter(locked=true)` 走免锁变体 `AdvanceLocked`/`GetGlyphLocked`（路由与 advance 值两路完全一致，断行=排版不变） |
+| 每次调用现构 `std::vector<Line>` | `hooks.cc` 三处 wrap + `wrap.cc` `WrapTextOptimal` 内层 | ✅ 已做：`thread_local` scratch + `clear()` 复用容量；`WrapTextOptimal` 尾部改 copy-assign（Line 是 `{ptr,len}` 视图，拷贝比让出缓冲再 malloc 便宜） |
+| 编译参数 | `src/CMakeLists.txt` | ✅ 已做：Release `/GL`+`/LTCG`（`INTERPROCEDURAL_OPTIMIZATION_RELEASE`，`check_ipo_supported` 守卫）；产物 138240→132608 B，5 导出齐全 |
+| 同一段文本被断两次 | `t_text_window_update_layout@0x885FF0` 先 `wrap_text` 再 `get_wrapped_height` | ⏸ 未做：等 `perf_log` 前后数字再定；若做 (size, text ptr, width) memo，失效条件要严格（文本缓冲会被 `set_text` 就地改） |
+
+验证（待办）：
+- [x] 首轮 `perf_log=true` 实测（2026-09-10，优化后 build）：`get_width` avg **1.5µs**、
+  `wrap_text` avg 3~6µs、`draw_to_pt` avg 10~16µs（含游戏自身 blit）；max ~1-3ms 均为首次
+  光栅化/长段落的一次性冷尖峰。热路径开销已无优化空间可挤，P4 各项达成预期
+- [x] 空日志行根因：`ReportFaceSubstitution` 用 `%S` 排 SimSun 的本地化名，CRT "C" locale 下
+  转成空串 → 改为 `WideToUtf8` + `%s`，并把 SimSun/宋体 等 7 对常用中文字体本地化名加入
+  `IsSameFace` 别名表（误报消失）；全项目加 `/utf-8` 消除 C4819
+- [ ] 复跑确认：H4CN.log 不再出现空 `H4CN: ` 行；`perf:` 行 avg/max 单位修正后应显示真实
+  µs 值（旧日志里的 `avg=0.0us` 是单位 bug，数值本身有效）
+- [ ] 显示与优化前逐像素一致（计时/锁/缓冲复用都不得改变行为），`wrap_tests`/`config_tests` 已绿
 
 ---
 

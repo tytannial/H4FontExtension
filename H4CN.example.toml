@@ -15,6 +15,10 @@ log_debug_view = true
 # 关掉后未挂钩的旧绘制路径会按 .fon 原始行高排版,可能出现行间重叠——
 # 仅用于对比排错,请保持 true。
 patch_line_height = true
+# 是否开启插件内部耗时统计(perf 计时)。开启后 H4CN.log 每累计 2048 次某类
+# 调用追加一行 `perf: <名称> n=… avg=… max=… total=…`(7 个 Hook 入口 + 字形
+# 光栅化)。默认关闭,关闭时热路径只多读一个 bool。仅调优/回归对比时打开。
+perf_log = false
 
 [render]
 # 字形光栅化的**全局默认**超采样倍数(1..4)。GDI 在这么小的字号上,细笔画只能落在
